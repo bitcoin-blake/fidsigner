@@ -4,19 +4,330 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Fid</title>
+<meta name="description" content="Fid: an airgapped signer for the BLAKE2b chain and nostr. Import a key, sign a PSBT, sign a nostr event. QR in, QR out. Nothing stored.">
 <style>
-  :root { --bg: #fafaf7; --fg: #1a1a1a; --mute: #666; }
-  @media (prefers-color-scheme: dark) { :root { --bg: #111; --fg: #eee; --mute: #999; } }
-  body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, sans-serif; max-width: 40rem; margin-inline: auto; }
-  h1 { font-size: 2rem; margin: 2rem 0 0; }
-  p.lede { font-size: 1.1rem; }
+  :root { --bg: #fafaf7; --fg: #1a1a1a; --mute: #6b6b66; --line: #d8d8d2; --card: #ffffff; --ok: #1f7a3a; --warn: #a33; --accent: #1a1a1a; --accent-fg: #fff; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #111; --fg: #eee; --mute: #999; --line: #333; --card: #1a1a1a; --ok: #5fcf7f; --warn: #ff7b7b; --accent: #eee; --accent-fg: #111; } }
+  :root[data-theme="dark"] { --bg: #111; --fg: #eee; --mute: #999; --line: #333; --card: #1a1a1a; --ok: #5fcf7f; --warn: #ff7b7b; --accent: #eee; --accent-fg: #111; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, sans-serif; }
+  main { max-width: 40rem; margin: 0 auto; }
+  h1 { font-size: 1.6rem; margin: .5rem 0 0; }
+  h2 { font-size: 1.1rem; margin: 1.5rem 0 .5rem; }
+  .lede { color: var(--mute); margin: 0 0 1rem; }
+  nav { display: flex; gap: 6px; flex-wrap: wrap; margin: 1rem 0; }
+  nav button, .chain button { padding: 6px 12px; border: 1px solid var(--line); background: var(--card); color: var(--fg); border-radius: 6px; cursor: pointer; }
+  nav button[aria-current="true"], .chain button[aria-current="true"] { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+  section[hidden] { display: none; }
+  textarea, input[type=text] { width: 100%; padding: 8px; font: 13px/1.4 ui-monospace, monospace; background: var(--card); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; }
+  textarea { min-height: 7rem; resize: vertical; }
+  button.go { padding: 8px 14px; background: var(--accent); color: var(--accent-fg); border: 0; border-radius: 6px; cursor: pointer; font-size: 15px; }
+  button.go:disabled { opacity: .4; cursor: default; }
+  button.quiet { padding: 6px 10px; background: transparent; color: var(--fg); border: 1px solid var(--line); border-radius: 6px; cursor: pointer; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: .5rem 0; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin: .75rem 0; overflow-wrap: anywhere; }
+  .mono { font: 13px/1.5 ui-monospace, monospace; }
   .mute { color: var(--mute); }
-  a { color: inherit; }
+  .ok { color: var(--ok); }
+  .warn { color: var(--warn); }
+  .err { color: var(--warn); margin: .5rem 0; }
+  canvas.qr { display: block; max-width: 100%; height: auto; margin: .5rem auto; background: #fff; border-radius: 6px; padding: 8px; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  td { padding: 4px 6px; border-top: 1px solid var(--line); vertical-align: top; }
+  td.n { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  video { width: 100%; max-height: 50vh; border-radius: 8px; background: #000; }
+  footer { margin: 2rem 0 1rem; color: var(--mute); font-size: 14px; }
+  .chain { display: flex; gap: 6px; flex-wrap: wrap; }
+  .badge { font-size: 13px; }
 </style>
+<script type="importmap">
+{ "imports": {
+  "@noble/curves/secp256k1": "https://esm.sh/@noble/curves@1.4.0/secp256k1",
+  "@noble/hashes/sha256": "https://esm.sh/@noble/hashes@1.4.0/sha256",
+  "qrcode": "https://esm.sh/qrcode@1.5.3"
+} }
+</script>
 </head>
 <body>
-<h1>Fid</h1>
-<p class="lede"><strong>An airgapped signer for the BLAKE2b chain and nostr.</strong> Show an xpub and an npub, sign a PSBT, sign a nostr event. QR in, QR out, nothing else.</p>
-<p class="mute">Nothing here yet. The plan is in the <a href="https://github.com/bitcoin-blake/fidsigner">README</a>.</p>
+<main>
+  <h1>Fid</h1>
+  <p class="lede">An airgapped signer for the BLAKE2b chain and nostr. Import a key, sign a PSBT, sign a nostr event. Nothing is stored. Close the tab and the key is gone.</p>
+  <p class="badge" id="selftest">Checking this build against the vectors…</p>
+
+  <div class="row">
+    <span class="mute">Chain</span>
+    <div class="chain" id="chains"></div>
+  </div>
+
+  <nav>
+    <button data-tab="key" aria-current="true">Key</button>
+    <button data-tab="psbt">Sign PSBT</button>
+    <button data-tab="nostr">Sign event</button>
+  </nav>
+
+  <section id="tab-key">
+    <div id="key-import">
+      <h2>Import a key</h2>
+      <p class="mute">64 hex characters, an nsec, or a WIF. Fid never generates keys. Use a device you trust, offline.</p>
+      <textarea id="key-input" placeholder="nsec1… or hex or WIF" autocomplete="off" spellcheck="false"></textarea>
+      <div class="row">
+        <button class="go" id="key-go">Import</button>
+        <button class="quiet" id="key-scan">Scan QR</button>
+      </div>
+      <div class="err" id="key-err"></div>
+    </div>
+    <div id="key-show" hidden>
+      <h2>This key</h2>
+      <div class="card mono">
+        <div><span class="mute">npub</span><br><span id="k-npub"></span></div>
+        <div style="margin-top:.5rem"><span class="mute">x-only pubkey</span><br><span id="k-xonly"></span></div>
+        <div style="margin-top:.5rem"><span class="mute">address on <span id="k-chain"></span></span><br><span id="k-addr"></span></div>
+      </div>
+      <canvas class="qr" id="k-qr"></canvas>
+      <div class="row">
+        <button class="quiet" id="k-qr-npub">QR: npub</button>
+        <button class="quiet" id="k-qr-addr">QR: address</button>
+        <button class="quiet warn" id="k-forget">Forget key</button>
+      </div>
+    </div>
+  </section>
+
+  <section id="tab-psbt" hidden>
+    <h2>Sign a PSBT</h2>
+    <p class="mute">Base64 or hex. Every input needs a witness utxo. Inputs paying to this key's untweaked taproot output get signed. On the BLAKE2b chains the signature opts in to the unified sighash (0x21), on the SHA256d chains it is BIP341 default. A blocktrail update is just a PSBT here.</p>
+    <textarea id="psbt-input" placeholder="cHNidP8B…" spellcheck="false"></textarea>
+    <div class="row">
+      <button class="go" id="psbt-review">Review</button>
+      <button class="quiet" id="psbt-scan">Scan QR</button>
+    </div>
+    <div class="err" id="psbt-err"></div>
+    <div id="psbt-desc" hidden>
+      <div class="card" id="psbt-table"></div>
+      <div class="row"><button class="go" id="psbt-sign">Sign</button></div>
+    </div>
+    <div id="psbt-out" hidden>
+      <h2>Signed</h2>
+      <div class="card">
+        <div id="psbt-summary"></div>
+        <div class="row">
+          <button class="quiet" id="psbt-show-final">Final transaction</button>
+          <button class="quiet" id="psbt-show-psbt">Signed PSBT</button>
+        </div>
+        <textarea id="psbt-result" readonly spellcheck="false"></textarea>
+      </div>
+      <canvas class="qr" id="psbt-qr"></canvas>
+      <p class="mute" id="psbt-qr-note"></p>
+    </div>
+  </section>
+
+  <section id="tab-nostr" hidden>
+    <h2>Sign a nostr event</h2>
+    <p class="mute">Paste an unsigned event (NIP-01 JSON). The pubkey is filled from the key, or must match it.</p>
+    <textarea id="ev-input" spellcheck="false">{"kind":1,"created_at":0,"tags":[],"content":""}</textarea>
+    <div class="row">
+      <button class="go" id="ev-review">Review</button>
+      <button class="quiet" id="ev-scan">Scan QR</button>
+      <button class="quiet" id="ev-now">Set created_at to now</button>
+    </div>
+    <div class="err" id="ev-err"></div>
+    <div id="ev-desc" hidden>
+      <div class="card" id="ev-table"></div>
+      <div class="row"><button class="go" id="ev-sign">Sign</button></div>
+    </div>
+    <div id="ev-out" hidden>
+      <h2>Signed event</h2>
+      <div class="card"><textarea id="ev-result" readonly spellcheck="false"></textarea></div>
+      <canvas class="qr" id="ev-qr"></canvas>
+      <p class="mute" id="ev-qr-note"></p>
+    </div>
+  </section>
+
+  <div id="scanner" hidden>
+    <video id="video" playsinline muted></video>
+    <div class="row"><button class="quiet" id="scan-stop">Stop</button><span class="mute" id="scan-status"></span></div>
+  </div>
+
+  <footer>
+    <a href="https://github.com/bitcoin-blake/fidsigner">Source and vectors</a>. Deterministic signatures, BIP340 with zero aux. Nothing leaves this page and nothing is kept.
+  </footer>
+</main>
+
+<script type="module">
+import QRCode from 'qrcode';
+import {
+  CHAINS, parsePrivateKey, keyInfo, xOnlyPubKey, hexToBytes, base64ToBytes, bytesToBase64,
+  parsePsbt, serializePsbt, signPsbt, describePsbt, signEvent, verifyEvent,
+} from './fid.js';
+
+const $ = (id) => document.getElementById(id);
+let priv = null;       // Uint8Array while a key is loaded, never persisted
+let chain = 'txbt';
+let psbtParsed = null, psbtSigned = null, eventParsed = null;
+
+// ---- self test: this build must reproduce vectors.json --------------------
+try {
+  const v = await (await fetch('./vectors.json')).json();
+  const k = hexToBytes(v.key.priv);
+  const ev = signEvent(v.nostr.unsigned, k);
+  const tx = signPsbt(parsePsbt(base64ToBytes(v.psbt.unsigned)), k, 'txbt').final;
+  const same = ev.sig === v.nostr.signed.sig && ev.id === v.nostr.signed.id && tx === v.psbt.chains.txbt.finalTx && keyInfo(k).npub === v.key.npub;
+  $('selftest').innerHTML = same ? '<span class="ok">This build reproduces the published vectors.</span>' : '<span class="warn">This build does NOT match the published vectors. Do not use it.</span>';
+} catch (e) {
+  $('selftest').innerHTML = '<span class="warn">Could not run the self test: ' + e.message + '</span>';
+}
+
+// ---- chain picker ----------------------------------------------------------
+for (const [id, c] of Object.entries(CHAINS)) {
+  const b = document.createElement('button');
+  b.textContent = id;
+  b.title = c.name;
+  b.setAttribute('aria-current', id === chain);
+  b.onclick = () => { chain = id; for (const x of $('chains').children) x.setAttribute('aria-current', x.textContent === id); renderKey(); psbtParsed = null; $('psbt-desc').hidden = true; $('psbt-out').hidden = true; };
+  $('chains').appendChild(b);
+}
+
+// ---- tabs ------------------------------------------------------------------
+for (const b of document.querySelectorAll('nav button')) b.onclick = () => {
+  for (const x of document.querySelectorAll('nav button')) x.setAttribute('aria-current', x === b);
+  for (const s of document.querySelectorAll('main > section')) s.hidden = s.id !== 'tab-' + b.dataset.tab;
+};
+
+// ---- key -------------------------------------------------------------------
+function needKey() { if (!priv) throw new Error('import a key first'); }
+function renderKey() {
+  if (!priv) return;
+  const info = keyInfo(priv);
+  $('k-npub').textContent = info.npub;
+  $('k-xonly').textContent = info.xonly;
+  $('k-chain').textContent = CHAINS[chain].name;
+  $('k-addr').textContent = info.addresses[chain];
+  qr($('k-qr'), info.npub);
+}
+$('key-go').onclick = () => {
+  $('key-err').textContent = '';
+  try {
+    priv = parsePrivateKey($('key-input').value);
+    $('key-input').value = '';
+    $('key-import').hidden = true; $('key-show').hidden = false;
+    renderKey();
+  } catch (e) { $('key-err').textContent = e.message; }
+};
+$('k-qr-npub').onclick = () => qr($('k-qr'), keyInfo(priv).npub);
+$('k-qr-addr').onclick = () => qr($('k-qr'), keyInfo(priv).addresses[chain]);
+$('k-forget').onclick = () => {
+  if (priv) priv.fill(0);
+  priv = null; psbtSigned = null; psbtParsed = null; eventParsed = null;
+  $('key-show').hidden = true; $('key-import').hidden = false;
+  $('psbt-out').hidden = true; $('ev-out').hidden = true;
+};
+
+// ---- psbt ------------------------------------------------------------------
+function parsePsbtText(s) {
+  s = s.trim();
+  if (/^[0-9a-fA-F]+$/.test(s) && s.length % 2 === 0 && s.toLowerCase().startsWith('70736274ff')) return parsePsbt(hexToBytes(s));
+  return parsePsbt(base64ToBytes(s));
+}
+const sats = (v) => v === null ? '?' : v.toLocaleString('en-US') + ' sat';
+$('psbt-review').onclick = () => {
+  $('psbt-err').textContent = ''; $('psbt-out').hidden = true;
+  try {
+    needKey();
+    psbtParsed = parsePsbtText($('psbt-input').value);
+    const d = describePsbt(psbtParsed, xOnlyPubKey(priv), chain);
+    const mine = d.inputs.filter(i => i.mine && !i.signed).length;
+    let h = `<div class="mono mute">txid ${d.txid}</div><table>`;
+    for (const i of d.inputs) h += `<tr><td>in ${i.index}</td><td class="mono">${i.outpoint}</td><td class="n">${sats(i.value)}</td><td>${i.mine ? (i.signed ? 'signed' : '<b>this key</b>') : 'other'}</td></tr>`;
+    for (const o of d.outputs) h += `<tr><td>out ${o.index}</td><td class="mono">${o.address}</td><td class="n">${sats(o.value)}</td><td>${o.mine ? 'back to this key' : ''}</td></tr>`;
+    h += `<tr><td>fee</td><td></td><td class="n">${sats(d.fee)}</td><td></td></tr></table>`;
+    h += `<p>${mine ? `Signing <b>${mine}</b> input${mine > 1 ? 's' : ''} on <b>${CHAINS[chain].name}</b>, sighash ${CHAINS[chain].unified ? '0x21 unified' : 'BIP341 default'}.` : '<span class="warn">No input here is spendable by this key.</span>'}</p>`;
+    $('psbt-table').innerHTML = h;
+    $('psbt-sign').disabled = !mine;
+    $('psbt-desc').hidden = false;
+  } catch (e) { $('psbt-err').textContent = e.message; $('psbt-desc').hidden = true; }
+};
+$('psbt-sign').onclick = () => {
+  $('psbt-err').textContent = '';
+  try {
+    psbtSigned = signPsbt(psbtParsed, priv, chain);
+    $('psbt-summary').innerHTML = `Signed input${psbtSigned.signed.length > 1 ? 's' : ''} ${psbtSigned.signed.join(', ')}. ` + (psbtSigned.final ? 'Every input is signed, the transaction below is ready to broadcast.' : 'Other signers still needed, pass the PSBT on.');
+    $('psbt-desc').hidden = true; $('psbt-out').hidden = false;
+    (psbtSigned.final ? showFinal : showSignedPsbt)();
+  } catch (e) { $('psbt-err').textContent = e.message; }
+};
+function showFinal() { const t = psbtSigned.final || ''; $('psbt-result').value = t; qr($('psbt-qr'), t, $('psbt-qr-note')); }
+function showSignedPsbt() { const t = bytesToBase64(serializePsbt(psbtSigned.psbt)); $('psbt-result').value = t; qr($('psbt-qr'), t, $('psbt-qr-note')); }
+$('psbt-show-final').onclick = showFinal;
+$('psbt-show-psbt').onclick = showSignedPsbt;
+
+// ---- nostr -----------------------------------------------------------------
+$('ev-now').onclick = () => {
+  try { const e = JSON.parse($('ev-input').value); e.created_at = Math.floor(Date.now() / 1000); $('ev-input').value = JSON.stringify(e); } catch {}
+};
+$('ev-review').onclick = () => {
+  $('ev-err').textContent = ''; $('ev-out').hidden = true;
+  try {
+    needKey();
+    eventParsed = JSON.parse($('ev-input').value);
+    const esc = (s) => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+    $('ev-table').innerHTML = `<table>
+      <tr><td>kind</td><td>${esc(eventParsed.kind)}</td></tr>
+      <tr><td>created_at</td><td>${esc(eventParsed.created_at)} <span class="mute">${eventParsed.created_at ? new Date(eventParsed.created_at * 1000).toISOString() : ''}</span></td></tr>
+      <tr><td>tags</td><td class="mono">${esc(JSON.stringify(eventParsed.tags))}</td></tr>
+      <tr><td>content</td><td>${esc(eventParsed.content)}</td></tr></table>`;
+    $('ev-desc').hidden = false;
+  } catch (e) { $('ev-err').textContent = e.message; $('ev-desc').hidden = true; }
+};
+$('ev-sign').onclick = () => {
+  $('ev-err').textContent = '';
+  try {
+    const ev = signEvent(eventParsed, priv);
+    if (!verifyEvent(ev)) throw new Error('signature did not verify');
+    const t = JSON.stringify(ev);
+    $('ev-result').value = t;
+    $('ev-desc').hidden = true; $('ev-out').hidden = false;
+    qr($('ev-qr'), t, $('ev-qr-note'));
+  } catch (e) { $('ev-err').textContent = e.message; }
+};
+
+// ---- qr out ----------------------------------------------------------------
+function qr(canvas, text, note) {
+  canvas.hidden = false;
+  QRCode.toCanvas(canvas, text, { width: 320, margin: 1, errorCorrectionLevel: text.length > 1500 ? 'L' : 'M' })
+    .then(() => { if (note) note.textContent = ''; })
+    .catch(() => { canvas.hidden = true; if (note) note.textContent = 'Too large for one QR, copy the text instead. Animated QR is on the list.'; });
+}
+
+// ---- qr in (BarcodeDetector where the browser has it) ---------------------
+let stream = null, scanTarget = null;
+async function scan(targetId) {
+  $('scan-status').textContent = '';
+  $('scanner').hidden = false;
+  if (!('BarcodeDetector' in window)) { $('scan-status').textContent = 'This browser cannot scan QR codes. Paste instead.'; return; }
+  scanTarget = targetId;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+  } catch (e) { $('scan-status').textContent = 'Camera: ' + e.message; return; }
+  const video = $('video');
+  video.srcObject = stream; await video.play();
+  const det = new BarcodeDetector({ formats: ['qr_code'] });
+  const tick = async () => {
+    if (!stream) return;
+    try {
+      const codes = await det.detect(video);
+      if (codes.length) { $(scanTarget).value = codes[0].rawValue; stopScan(); return; }
+    } catch {}
+    requestAnimationFrame(tick);
+  };
+  tick();
+}
+function stopScan() {
+  if (stream) for (const t of stream.getTracks()) t.stop();
+  stream = null; $('video').srcObject = null; $('scanner').hidden = true;
+}
+$('scan-stop').onclick = stopScan;
+$('key-scan').onclick = () => scan('key-input');
+$('psbt-scan').onclick = () => scan('psbt-input');
+$('ev-scan').onclick = () => scan('ev-input');
+</script>
 </body>
 </html>

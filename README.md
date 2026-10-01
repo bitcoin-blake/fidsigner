@@ -23,6 +23,22 @@ Target boards, all off the shelf: Maix Amigo, M5StickV, M5Stack CoreS3.
 
 No secure element, no vendor. Reproducible builds and a thin, readable codebase instead. Run it on txbt4 for months before pointing mainnet funds at it.
 
-## Status
+## What works today
 
-Nothing yet. This page is the plan.
+The browser build. Import a key (hex, nsec or WIF), see the npub and the taproot address on each chain, review and sign a PSBT, review and sign a nostr event. QR out for everything, QR in where the browser has BarcodeDetector. The page checks itself against `vectors.json` on load and says so at the top.
+
+```
+npm install
+npm test          # 166 Knots unified sighash vectors, then Fid's own
+npm run vectors   # regenerate vectors.json from this code
+```
+
+Files: `fid.js` is the signer (keys, PSBT, BIP341 and unified sighash, nostr), `unified.js` is the unified sighash from blaketest, `index.html` is the page. Nothing else.
+
+## Not yet
+
+- Mnemonic import and NIP-06 derivation. Today the key is the raw 32 bytes, and the taproot output is the untweaked npub key, same as blaketest.
+- Animated QR for PSBTs too big for one code.
+- Multisig and script-path inputs. Only key-path spends to this key are signed.
+- BIP341 sighash checked against the BIP's own vectors. The unified sighash is checked against the Knots vectors; the plain taproot one is only round-tripped.
+- The firmware.

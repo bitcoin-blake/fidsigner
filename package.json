@@ -1,0 +1,15 @@
+{
+  "name": "fidsigner",
+  "version": "0.1.0",
+  "description": "Fid: an airgapped signer for the BLAKE2b chain and nostr. Browser reference build.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "node test.mjs",
+    "vectors": "node test.mjs --write"
+  },
+  "dependencies": {
+    "@noble/curves": "1.4.0",
+    "@noble/hashes": "1.4.0"
+  }
+}

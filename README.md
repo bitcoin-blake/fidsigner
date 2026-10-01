@@ -6,7 +6,7 @@ Live: https://bitcoin-blake.github.io/fidsigner/
 
 ## Shape
 
-- **Import only, never generate.** The seed comes in as a SeedQR or words. No entropy code on the device.
+- **Import only, never generate.** The key comes in as hex, an nsec or a WIF. No mnemonics, no derivation, no entropy code on the device. The taproot output is the untweaked npub key.
 - **Stateless.** Nothing is stored. Power off and the key is gone.
 - **Three operations.** Keys, PSBT, nostr event. Blocktrail updates are PSBTs signed with the nostr key path.
 - **Chains.** btc, tbtc, xbt (BLAKE2b mainnet), txbt (BLAKE2b testnet4). Unified sighash on the BLAKE2b chains.
@@ -37,7 +37,6 @@ Files: `fid.js` is the signer (keys, PSBT, BIP341 and unified sighash, nostr), `
 
 ## Not yet
 
-- Mnemonic import and NIP-06 derivation. Today the key is the raw 32 bytes, and the taproot output is the untweaked npub key, same as blaketest.
 - Animated QR for PSBTs too big for one code.
 - Multisig and script-path inputs. Only key-path spends to this key are signed.
 - BIP341 sighash checked against the BIP's own vectors. The unified sighash is checked against the Knots vectors; the plain taproot one is only round-tripped.
